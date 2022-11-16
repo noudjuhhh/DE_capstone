@@ -6,17 +6,16 @@ from typing import Iterator
 import psycopg2
 import configparser
 from sql_queries import create_table_queries
+import boto3
+from utils import profile
+from tempfile import NamedTemporaryFile
 
 config = configparser.ConfigParser()
-config.read("dwh.cfg")
-
-DWH_DB = config["dwh"]["db"]
-DWH_DB_USER = config["dwh"]["user"]
-DWH_DB_PASSWORD = config["dwh"]["password"]
-DWH_PORT = config["dwh"]["port"]
-DWH_HOST = config["dwh"]["host"]
+config.read("config.cfg")
 
 S3_BUCKET = config["s3"]["bucket"]
+KEY = config["aws"]["key"]
+SECRET = config["aws"]["secret"]
 
 
 def get_weather_data(start_date: date, end_date: date) -> Iterator[pd.DataFrame]:
@@ -64,10 +63,17 @@ def create_tables(connection):
 
 
 def weather_data_to_s3(start_date: date, end_date: date) -> None:
+    s3 = boto3.resource(
+        "s3",
+        region_name="us-east-1",
+        aws_access_key_id=KEY,
+        aws_secret_access_key=SECRET,
+    )
+
     counter = 0
     for df in get_weather_data(start_date, end_date):
         s3.Object(
-            "mybucket",
+            S3_BUCKET,
             "raw/weather/New_York/"
             + str(start_date)
             + "-"
@@ -79,15 +85,38 @@ def weather_data_to_s3(start_date: date, end_date: date) -> None:
         counter += 1
 
 
+@profile
+def taxi_data_to_s3(stream_to_s3=True) -> None:
+    s3 = boto3.resource(
+        "s3",
+        region_name="us-east-1",
+        aws_access_key_id=KEY,
+        aws_secret_access_key=SECRET,
+    )
+    url = "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2021-01.parquet"
+    s3_key = "raw/taxi/New_York/" + url.split("/")[-1]
+
+    if stream_to_s3:
+        with requests.get(url, stream=True) as r:
+            s3.Bucket(S3_BUCKET).upload_fileobj(r.raw, s3_key)
+    else:
+        with NamedTemporaryFile("wb") as f:
+            data = requests.get(url)
+            f.write(data.content)
+            s3.Bucket(S3_BUCKET).upload_file(f.name, s3_key)
+
+
 def main():
     # conn = psycopg2.connect(
-    #     f"host={DWH_HOST} dbname={DWH_DB} user={DWH_DB_USER} password={DWH_DB_PASSWORD} port={DWH_PORT}"
+    #     "dbname={db} user={user} password={password} port={port} host={host}".format(
+    #         **config["redshift"]
+    #     )
     # )
-    # create_tables(conn)
-    stage_weather_data(conn, date(2021, 1, 1), date(2021, 2, 1))
-    conn.close()
+    # # create_tables(conn)
+    # conn.close()
+    weather_data_to_s3(date(2021, 1, 1), date(2021, 2, 1))
+    taxi_data_to_s3()
 
 
 if __name__ == "__main__":
-    # main()
-    pass
+    main()
