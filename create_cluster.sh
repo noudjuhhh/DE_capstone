@@ -1,0 +1,1 @@
+aws redshift create-cluster --cluster-identifier DWH --cluster-type multi-node --node-type dc2.large --number-of-nodes 4 --db-name dwh --master-username dwhuser --master-user-password Passw0rd --region us-west-2
