@@ -15,6 +15,8 @@ from sql_queries import (
 import boto3
 from tempfile import NamedTemporaryFile
 from logging import getLogger, basicConfig, INFO
+from sqlalchemy_schemadisplay import create_schema_graph
+from sqlalchemy import MetaData
 
 basicConfig(level=INFO)
 logger = getLogger(__name__)
@@ -28,6 +30,10 @@ SECRET = config["aws"]["secret"]
 
 
 def get_weather_data(start_date: date, end_date: date) -> Iterator[pd.DataFrame]:
+    """
+    Gets the weather data from the weather API as a generator to save memory
+    """
+
     def to_datestring(date_object: date) -> str:
         return date_object.strftime("%Y%m%d")
 
@@ -62,7 +68,25 @@ def get_weather_data(start_date: date, end_date: date) -> Iterator[pd.DataFrame]
         yield weather_data
 
 
+def create_ERD() -> None:
+    """
+    Creates an ERD of our database when all data is imported
+    """
+    graph = create_schema_graph(
+        metadata=MetaData(
+            "postgresql://{user}:{password}@{host}:{port}/{db}".format(
+                **config["redshift"]
+            )
+        )
+    )
+    graph.write_png("./img/schema.png")
+
+
 class SQL_ETL:
+    """
+    Class that has all the ETL processes for Redshift (drop, create, copy, and so forth)
+    """
+
     def __init__(self):
         self.connection = psycopg2.connect(
             "dbname={db} user={user} password={password} port={port} host={host}".format(
@@ -78,29 +102,29 @@ class SQL_ETL:
 
     def create_tables(self) -> None:
         """
-        Creates each table using the queries in `create_table_queries` list.
+        Creates each table
         """
         logger.info("Creating tables in Redshift")
         self._loop_and_execute(self.connection, CreateQueries().queries())
 
     def drop_tables(self) -> None:
         """
-        Drops each table using the queries in `drop_table_queries` list.
+        Drops each table
         """
         logger.info("Dropping tables in Redshift")
         self._loop_and_execute(self.connection, DropQueries().queries())
 
     def copy_tables(self) -> None:
         """
-        Copy table using the queries in `copy_data_queries` list.
+        Copies the data from S3 into each table
         """
         logger.info("Copying data from S3 to Redshift")
         self._loop_and_execute(self.connection, CopyQueries().queries())
 
     def data_quality_checks(self) -> None:
         """
-        Checks for the data quality queries that the result does
-        equal 0
+        Checks for the data quality queries that the result
+            equals 0
         """
         logger.info("Checking the data quality of the staged tables.")
         with self.connection.cursor() as cursor:
@@ -116,7 +140,7 @@ class SQL_ETL:
 
     def populate_tables(self) -> None:
         """
-        Populate tables using the queries in `populate_table_queries` list.
+        Populates the analytics tables using staged tables
         """
         logger.info("Populating tables in Redshift")
         self._loop_and_execute(self.connection, PopulateQueries().queries())
@@ -126,6 +150,10 @@ class SQL_ETL:
 
 
 class DataToS3:
+    """
+    Class that stages the data from different sources into S3 as CSVs
+    """
+
     def __init__(self):
         self.s3 = boto3.resource(
             "s3",
@@ -184,18 +212,30 @@ class DataToS3:
 
 
 def main() -> None:
-    # stager = DataToS3()
-    # stager.weather_data_to_s3(date(2021, 1, 1), date(2021, 1, 31))
-    # stager.taxi_data_to_s3(2021, 1)
-    # stager.taxi_zone_ids_to_s3()
+    """
+    1. Gets the weather data for January 2021 into S3
+    2. Gets the taxi data for January 2021 into S3
+    3. Gets the taxi location ids into S3
+    4. Drops all tables if they exist
+    5. Creates all tables
+    6. Copies the data from S3 into the staging tables
+    7. Some data quality checks if the data is as expected
+    8. We transform the data from the staging tables
+    9. We close the connection
+    """
+    stager = DataToS3()
+    stager.weather_data_to_s3(date(2021, 1, 1), date(2021, 1, 31))  # Step 1
+    stager.taxi_data_to_s3(2021, 1)  # Step 2
+    stager.taxi_zone_ids_to_s3()  # Step 3
     ETL = SQL_ETL()
-    ETL.drop_tables()
-    ETL.create_tables()
-    ETL.copy_tables()
-    ETL.data_quality_checks()
-    ETL.populate_tables()
-    ETL.close_connection()
+    ETL.drop_tables()  # Step 4
+    ETL.create_tables()  # Step 5
+    ETL.copy_tables()  # Step 6
+    ETL.data_quality_checks()  # Step 7
+    ETL.populate_tables()  # Step 8
+    ETL.close_connection()  # Step 9
 
 
 if __name__ == "__main__":
+    # create_ERD()
     main()

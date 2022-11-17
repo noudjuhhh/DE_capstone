@@ -10,6 +10,10 @@ SECRET = config["aws"]["secret"]
 
 
 class CreateQueries:
+    """
+    Contains all the queries for the creation of tables
+    """
+
     staging_weather_create = """
     CREATE TABLE IF NOT EXISTS staging_weather (
         valid_time_gmt bigint,
@@ -60,7 +64,7 @@ class CreateQueries:
 
     time_table_create = """
     CREATE TABLE IF NOT EXISTS time_table (
-        time_column timestamp PRIMARY KEY distkey sortkey,
+        time_column timestamptz PRIMARY KEY distkey sortkey,
         hour int,
         day int,
         week int,
@@ -73,8 +77,8 @@ class CreateQueries:
     taxi_table_create = """
     CREATE TABLE IF NOT EXISTS taxi_facts (
         ride_id int IDENTITY(0,1) PRIMARY KEY,
-        pickup_timestamp timestamp NOT NULL REFERENCES time_table(time_column) distkey sortkey,
-        dropoff_timestamp timestamp NOT NULL REFERENCES time_table(time_column),
+        pickup_timestamp timestamptz NOT NULL REFERENCES time_table(time_column) distkey sortkey,
+        dropoff_timestamp timestamptz NOT NULL REFERENCES time_table(time_column),
         passenger_count smallint,
         trip_distance float NOT NULL,
         pickup_location_id smallint NOT NULL REFERENCES taxi_locations(location_id),
@@ -86,7 +90,7 @@ class CreateQueries:
 
     weather_table_create = """
     CREATE TABLE IF NOT EXISTS weather_facts (
-        time_column timestamp PRIMARY KEY REFERENCES time_table(time_column) distkey sortkey,
+        time_column timestamptz PRIMARY KEY REFERENCES time_table(time_column) distkey sortkey,
         temperature smallint NOT NULL,
         dewpoint_temperature smallint NOT NULL,
         relative_humidity smallint NOT NULL,
@@ -110,6 +114,10 @@ class CreateQueries:
 
 
 class CopyQueries:
+    """
+    Contains all the queries for the copying of the data from S3 into
+        the tables
+    """
 
     table_and_sources = {
         "staging_weather": "raw/weather/New_York",
@@ -137,6 +145,10 @@ class CopyQueries:
 
 
 class PopulateQueries:
+    """
+    Contains all the queries to populate the analytics tables
+        from the staging tables
+    """
 
     taxi_table = """
     INSERT INTO taxi_facts (
@@ -159,6 +171,8 @@ class PopulateQueries:
         fare_amount,
         total_amount AS paid_amount
     FROM staging_taxi
+    WHERE
+        fare_amount >=0 AND paid_amount => 0
     """
 
     weather_table = """
@@ -236,6 +250,10 @@ class PopulateQueries:
 
 
 class QualityQueries:
+    """
+    Contains all the queries for the data quality checks
+    """
+
     def queries(self) -> List[str]:
         return [
             """select count(*) from staging_weather where temp > 100 or temp < -100""",
@@ -245,6 +263,10 @@ class QualityQueries:
 
 
 class DropQueries:
+    """
+    Contains all the queries for dropping all the views and tables
+    """
+
     tables_to_drop = "staging_weather, staging_taxi, taxi_facts, weather_facts, taxi_locations, time_table".split(
         ", "
     )
@@ -254,21 +276,3 @@ class DropQueries:
         return ["DROP VIEW IF EXISTS " + table for table in self.views_to_drop] + [
             "DROP TABLE IF EXISTS " + table for table in self.tables_to_drop
         ]
-
-
-"""
-select rain,
-sum(counts)/count(hour) as rides_per_hour
-FROM
-(SELECT 
-	count(a.pickup_timestamp) as counts,
-    a.precipitation > 0 as rain,
-    b.hour,
-    b.day,
-    b.month,
-    b.year
-from taxi_weather_facts a, time_table b
-where a.pickup_timestamp = b.time_column
-group by rain, b.hour, b.day, b.month, b.year)
-group by rain
-"""
