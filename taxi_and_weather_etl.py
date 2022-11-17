@@ -28,7 +28,7 @@ SECRET = config["aws"]["secret"]
 
 
 def get_weather_data(start_date: date, end_date: date) -> Iterator[pd.DataFrame]:
-    def to_datestring(date_object):
+    def to_datestring(date_object: date) -> str:
         return date_object.strftime("%Y%m%d")
 
     session = requests.Session()
@@ -151,7 +151,7 @@ class DataToS3:
             ).put(Body=df.to_csv(index=False), ContentType="text/csv")
             counter += 1
 
-    def taxi_data_to_s3(self, year, month) -> None:
+    def taxi_data_to_s3(self, year: int, month: int) -> None:
         logger.info("Downloading taxi data to S3")
         s3 = self.s3
         url = (

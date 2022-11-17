@@ -1,4 +1,5 @@
 import configparser
+from typing import List
 
 config = configparser.ConfigParser()
 config.read("config.cfg")
@@ -97,7 +98,7 @@ class CreateQueries:
     )
     """
 
-    def queries(self):
+    def queries(self) -> List[str]:
         return [
             self.staging_weather_create,
             self.staging_taxi_create,
@@ -116,7 +117,7 @@ class CopyQueries:
         "taxi_locations (location_id, borough, zone, service_zone)": "raw/taxi/New_York/taxi_zone_lookup",
     }
 
-    def _copy_query(self, table_name, s3_key):
+    def _copy_query(self, table_name: str, s3_key: str) -> str:
         return f"""
         COPY {table_name}
         FROM 's3://{S3_BUCKET}/{s3_key}'
@@ -128,7 +129,7 @@ class CopyQueries:
         IGNOREHEADER 1
         """
 
-    def queries(self):
+    def queries(self) -> List[str]:
         return [
             self._copy_query(dict_key, self.table_and_sources[dict_key])
             for dict_key in self.table_and_sources.keys()
@@ -225,7 +226,7 @@ class PopulateQueries:
     )
     """
 
-    def queries(self):
+    def queries(self) -> List[str]:
         return [
             self.time_table,
             self.taxi_table,
@@ -235,7 +236,7 @@ class PopulateQueries:
 
 
 class QualityQueries:
-    def queries(self):
+    def queries(self) -> List[str]:
         return [
             """select count(*) from staging_weather where temp > 100 or temp < -100""",
             """select count(*) from staging_taxi where trip_distance < 0""",
@@ -249,7 +250,7 @@ class DropQueries:
     )
     views_to_drop = ["taxi_weather_facts"]
 
-    def queries(self):
+    def queries(self) -> List[str]:
         return ["DROP VIEW IF EXISTS " + table for table in self.views_to_drop] + [
             "DROP TABLE IF EXISTS " + table for table in self.tables_to_drop
         ]
