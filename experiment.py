@@ -5,10 +5,19 @@ import pandas as pd
 from typing import Iterator
 import psycopg2
 import configparser
-from sql_queries import create_table_queries
+from sql_queries import (
+    CopyQueries,
+    CreateQueries,
+    PopulateQueries,
+    QualityQueries,
+    DropQueries,
+)
 import boto3
-from utils import profile
 from tempfile import NamedTemporaryFile
+from logging import getLogger, basicConfig, INFO
+
+basicConfig(level=INFO)
+logger = getLogger(__name__)
 
 config = configparser.ConfigParser()
 config.read("config.cfg")
@@ -27,10 +36,11 @@ def get_weather_data(start_date: date, end_date: date) -> Iterator[pd.DataFrame]
 
     while True:
 
-        if next_date_to_get >= end_date:
+        date_to_get = next_date_to_get
+
+        if date_to_get > end_date:
             break
 
-        date_to_get = next_date_to_get
         next_date_to_get = date_to_get + timedelta(days=1)
 
         r = session.get(
@@ -52,70 +62,139 @@ def get_weather_data(start_date: date, end_date: date) -> Iterator[pd.DataFrame]
         yield weather_data
 
 
-def create_tables(connection):
-    """
-    Creates each table using the queries in `create_table_queries` list.
-    """
-    with connection.cursor() as cursor:
-        for query in create_table_queries:
-            cursor.execute(query)
-            connection.commit()
+class SQL_ETL:
+    def __init__(self):
+        self.connection = psycopg2.connect(
+            "dbname={db} user={user} password={password} port={port} host={host}".format(
+                **config["redshift"]
+            )
+        )
+
+    def _loop_and_execute(self, connection, queries) -> None:
+        with connection.cursor() as cursor:
+            for query in queries:
+                cursor.execute(query)
+                connection.commit()
+
+    def create_tables(self) -> None:
+        """
+        Creates each table using the queries in `create_table_queries` list.
+        """
+        logger.info("Creating tables in Redshift")
+        self._loop_and_execute(self.connection, CreateQueries().queries())
+
+    def drop_tables(self) -> None:
+        """
+        Drops each table using the queries in `drop_table_queries` list.
+        """
+        logger.info("Dropping tables in Redshift")
+        self._loop_and_execute(self.connection, DropQueries().queries())
+
+    def copy_tables(self) -> None:
+        """
+        Copy table using the queries in `copy_data_queries` list.
+        """
+        logger.info("Copying data from S3 to Redshift")
+        self._loop_and_execute(self.connection, CopyQueries().queries())
+
+    def data_quality_checks(self) -> None:
+        """
+        Checks for the data quality queries that the result does
+        equal 0
+        """
+        logger.info("Checking the data quality of the staged tables.")
+        with self.connection.cursor() as cursor:
+            count = 1
+            for query in QualityQueries().queries():
+                cursor.execute(query)
+                results = cursor.fetchall()
+                result = results[0][0]
+                assert (
+                    result == 0
+                ), f"Data quality not passed for test {count}, found {result} instead of 0"
+                count += 1
+
+    def populate_tables(self) -> None:
+        """
+        Populate tables using the queries in `populate_table_queries` list.
+        """
+        logger.info("Populating tables in Redshift")
+        self._loop_and_execute(self.connection, PopulateQueries().queries())
+
+    def close_connection(self) -> None:
+        self.connection.close()
 
 
-def weather_data_to_s3(start_date: date, end_date: date) -> None:
-    s3 = boto3.resource(
-        "s3",
-        region_name="us-east-1",
-        aws_access_key_id=KEY,
-        aws_secret_access_key=SECRET,
-    )
+class DataToS3:
+    def __init__(self):
+        self.s3 = boto3.resource(
+            "s3",
+            region_name="us-east-1",
+            aws_access_key_id=KEY,
+            aws_secret_access_key=SECRET,
+        )
 
-    counter = 0
-    for df in get_weather_data(start_date, end_date):
-        s3.Object(
-            S3_BUCKET,
-            "raw/weather/New_York/"
-            + str(start_date)
+    def weather_data_to_s3(self, start_date: date, end_date: date) -> None:
+        logger.info("Downloading weather data to S3")
+        s3 = self.s3
+        counter = 1
+        for df in get_weather_data(start_date, end_date):
+            s3.Object(
+                S3_BUCKET,
+                "raw/weather/New_York/"
+                + str(start_date)
+                + "-"
+                + str(end_date)
+                + "/day_"
+                + str(counter)
+                + ".csv",
+            ).put(Body=df.to_csv(index=False), ContentType="text/csv")
+            counter += 1
+
+    def taxi_data_to_s3(self, year, month) -> None:
+        logger.info("Downloading taxi data to S3")
+        s3 = self.s3
+        url = (
+            "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_"
+            + str(year)
             + "-"
-            + str(end_date)
-            + "/day_"
-            + str(counter)
-            + ".csv",
-        ).put(Body=df.to_csv())
-        counter += 1
+            + str(month).zfill(2)
+            + ".parquet"
+        )
+        s3_key = "raw/taxi/New_York/" + url.split("/")[-1][:-7] + "csv"
 
-
-@profile
-def taxi_data_to_s3(stream_to_s3=True) -> None:
-    s3 = boto3.resource(
-        "s3",
-        region_name="us-east-1",
-        aws_access_key_id=KEY,
-        aws_secret_access_key=SECRET,
-    )
-    url = "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2021-01.parquet"
-    s3_key = "raw/taxi/New_York/" + url.split("/")[-1]
-
-    if stream_to_s3:
-        with requests.get(url, stream=True) as r:
-            s3.Bucket(S3_BUCKET).upload_fileobj(r.raw, s3_key)
-    else:
+        # if stream_to_s3:
+        #     with requests.get(url, stream=True) as r:
+        #         s3.Bucket(S3_BUCKET).upload_fileobj(r.raw, s3_key)
+        # else:
         with NamedTemporaryFile("wb") as f:
             data = requests.get(url)
             f.write(data.content)
-            s3.Bucket(S3_BUCKET).upload_file(f.name, s3_key)
+            s3.Object(S3_BUCKET, s3_key).put(
+                Body=pd.read_parquet(f.name).to_csv(index=False), ContentType="text/csv"
+            )
+
+    def taxi_zone_ids_to_s3(self) -> None:
+        logger.info("Downloading taxi zone lookup data to S3")
+        s3 = self.s3
+        url = "https://d37ci6vzurychx.cloudfront.net/misc/taxi+_zone_lookup.csv"
+        s3_key = "raw/taxi/New_York/taxi_zone_lookup.csv"
+        with requests.get(url, stream=True) as r:
+            s3.Object(S3_BUCKET, s3_key).put(Body=r.text, ContentType="text/csv")
 
 
-def main():
-    # conn = psycopg2.connect(
-    #     "dbname={db} user={user} password={password} port={port} host={host}".format(
-    #         **config["redshift"]
-    #     )
-    # )
-    # # create_tables(conn)
-    # conn.close()
-    weather_data_to_s3(date(2021, 1, 1), date(2021, 2, 1))
-    taxi_data_to_s3()
+def main() -> None:
+    # stager = DataToS3()
+    # stager.weather_data_to_s3(date(2021, 1, 1), date(2021, 1, 31))
+    # stager.taxi_data_to_s3(2021, 1)
+    # stager.taxi_zone_ids_to_s3()
+    ETL = SQL_ETL()
+    ETL.drop_tables()
+    ETL.create_tables()
+    ETL.copy_tables()
+    ETL.data_quality_checks()
+    ETL.populate_tables()
+    ETL.close_connection()
 
 
 if __name__ == "__main__":
