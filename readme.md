@@ -77,7 +77,7 @@ We find that there are less rides when there is rain then where there is rain, w
 
 For further development, Airflow could be incorporated to run this pipeline on a monthly basis. If we wish to run this pipeline every day, we could obtain the taxi dataset each day from [NYC OpenData](https://data.cityofnewyork.us/browse?Dataset-Information_Agency=Taxi+and+Limousine+Commission+%28TLC%29&). The weather data can be obtained from the API as is on a daily basis. The ETL script can easily be implemented in Airflow, as it is structured as a DAG would be.
 
-The data could easily scale as we are using Redshift to 100x. In that case, we might have to add some nodes to our clusters. The table data is distributed by making use of `diststyle`, `distkey` and `sortkey` where necessary to ensure optimal query performance. Therefore, Redshift could also easily accomodate access by 100+ people per day.
+The data could easily scale to 100x as we are using Redshift. In that case, we might have to add some nodes to our clusters. The table data is distributed by making use of `diststyle`, `distkey` and `sortkey` where necessary to ensure optimal query performance. Therefore, Redshift could also easily accomodate access by 100+ people per day.
 
 ## Contributing
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
