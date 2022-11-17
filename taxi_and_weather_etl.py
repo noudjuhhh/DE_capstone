@@ -146,6 +146,7 @@ class SQL_ETL:
         self._loop_and_execute(self.connection, PopulateQueries().queries())
 
     def close_connection(self) -> None:
+        logger.info("All done! Closing connection.")
         self.connection.close()
 
 

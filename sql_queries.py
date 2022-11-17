@@ -172,7 +172,7 @@ class PopulateQueries:
         total_amount AS paid_amount
     FROM staging_taxi
     WHERE
-        fare_amount >=0 AND paid_amount => 0
+        fare_amount >= 0 AND paid_amount >= 0
     """
 
     weather_table = """
