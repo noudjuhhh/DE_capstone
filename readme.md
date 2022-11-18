@@ -6,13 +6,20 @@ I would like to find some relationships between the weather and taxi rides in Ne
 
 The goal is to run an analytical query that can tell us if the amount of trips increases when it is raining or not. From there, we would like to delve deeper, e.g., assess the effect of rush hour on the amount of trips when it is raining. Thus, the goal is to build a database that facilitates analysis.
 
+## Technologies used
+The technologies were chosen and used in the following order:
+
+* First, to stage the raw data, S3 was used for storage as it is easy to set up compared to HDFS.
+* From there, the choice would be to either use Spark to wrangle the data or simply Redshift. In this case, I chose to use Redshift, as it is easy to set up, scales linearly, and can be used as the database for analysis as well. Spark, in this case, would be overkill, as we are not doing complex transformations that Redshift cannot handle.
+* Finally, we use python to execute the ETL, as we can simply transform it to Airflow if we were to schedule our pipeline.
+
 ## How to use
 
 Do as follows:
 
-1. Creat a Redshift cluster by running `sh create_cluster.sh` in the terminal.
-2. Fill in all details in the `config_example.cfg` file and rename to `config.cfg`
-3. Run `python taxi_and_weather_etl.py` from the terminal and check its output
+1. Create a Redshift cluster by running `sh create_cluster.sh` in the terminal.
+2. Fill in all details in the `config_example.cfg` file and rename to `config.cfg`.
+3. Run `python taxi_and_weather_etl.py` from the terminal and check its output.
 4. Enjoy!
 
 ## Data assesment
@@ -23,10 +30,10 @@ The data was assesed in the file `data_exploration.ipynb`.
 
 For the pipeline we'll undertake the following process:
 
-1. We stage the data in S3 in CSV format
-2. We import the data from S3 into Redshift using staging tables
-3. We do some data checks to ensure that the import went well
-4. We do transformations to obtain our data model for our analyses
+1. We stage the data in S3 in CSV format.
+2. We import the data from S3 into Redshift using staging tables.
+3. We do some data checks to ensure that the import went well.
+4. We do transformations to obtain our data model for our analyses.
 
 ## Data model
 
@@ -36,8 +43,8 @@ For the data model, we used the ERD as given below.
 
 Thus, we first stage the data untouched in Redshift. We create two tables:
 
-* `staging_weather`, which contains the raw weather data
-* `staging_taxi`, which contains the raw taxi data
+* `staging_weather`, which contains the raw weather data.
+* `staging_taxi`, which contains the raw taxi data.
 
 Second, we can directly import the CSV for the location IDs in one table:
 
@@ -82,29 +89,29 @@ Here, we provide a simpel data dictionary for all tables except the staging tabl
 
 |Column name|Description|
 |-|-|
-|ride_id|Unique identifier for a ride|
-|pickup_timestamp|Timestamp in NYC time at which the passenger(s) were picked up|
-|dropoff_timestamp|Timestamp in NYC time at which the passenger(s) were dropped off|
+|ride_id|Unique identifier for a ride.|
+|pickup_timestamp|Timestamp in NYC time at which the passenger(s) were picked up.|
+|dropoff_timestamp|Timestamp in NYC time at which the passenger(s) were dropped off.|
 |passenger_count|The amount of passengers in a ride. Can be NULL if not filled in by the driver.|
-|trip_distance|The distance of the trip in miles|
-|pickup_location_id|The location ID of where the passenger(s) were picked up|
-|drop_off_location_id|The location ID of where the passenger(s) were dropped off|
-|fare_amount|The cost of the trip as measured by the taxi meter|
-|paid_amount|The amount actually paid by the passenger. The difference with the fare_amount is the tip|
+|trip_distance|The distance of the trip in miles.|
+|pickup_location_id|The location ID of where the passenger(s) were picked up.|
+|drop_off_location_id|The location ID of where the passenger(s) were dropped off.|
+|fare_amount|The cost of the trip as measured by the taxi meter.|
+|paid_amount|The amount actually paid by the passenger. The difference with the fare_amount is the tip.|
 
 * `weather_facts`
 
 |Column name|Description|
 |-|-|
-|time_column|Timestamp in NYC time of when the observation was made|
-|temperature|The temperature as measured in degrees Celsius|
-|dewpoint_temperature|The dewpoint temperature as measured in degrees Celsius|
-|relative_humidity|The relative humidity as measured in a percentage|
-|pressure|The pressure as measured in pascal|
-|windspeed|The windspeed as measured in m/s|
-|precipitation|The precipitation as measured in millimeters|
-|feels_like|The feels like temperature as expressed in degrees Celsius|
-|classification|A classification of the weather conditions, e.g., cloudy or rainy|
+|time_column|Timestamp in NYC time of when the observation was made.|
+|temperature|The temperature as measured in degrees Celsius.|
+|dewpoint_temperature|The dewpoint temperature as measured in degrees Celsius.|
+|relative_humidity|The relative humidity as measured in a percentage.|
+|pressure|The pressure as measured in pascal.|
+|windspeed|The windspeed as measured in m/s.|
+|precipitation|The precipitation as measured in millimeters.|
+|feels_like|The feels like temperature as expressed in degrees Celsius.|
+|classification|A classification of the weather conditions, e.g., cloudy or rainy.|
 
 ## Analysis
 
@@ -127,6 +134,13 @@ FROM (
 )
 GROUP BY rain
 ~~~~
+
+This results in the table below.
+
+|rain|rides_per_hour|
+|-|-|
+|true|1434|
+|false|1788|
 
 We find that there are less rides on average when there is rain then where there is rain, which corresponds to the conclusion of [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5584943/). However, the paper also states that rush-hour makes a difference, which we leave up to the reader to find out.
 
